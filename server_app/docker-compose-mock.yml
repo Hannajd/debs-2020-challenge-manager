@@ -1,0 +1,24 @@
+networks:
+  bench: {}
+services:
+  client:
+    image: new_name
+    container_name: new_name
+    depends_on:
+    - server
+    environment:
+      BENCHMARK_SYSTEM_URL: server
+    links:
+    - server
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    container_name: benchmark-server-logging
+    restart: always
+    env_file:
+      - .env
+    volumes:
+    - ${HOST_DATASET_FOLDER}:/dataset
+    - ${HOST_LOG_FOLDER}:/logs
+version: '3'
