@@ -5,3 +5,7 @@ __pycache__/
 logs/
 manager_logs/
 .ipynb_checkpoints/
+.vscode/
+.dataset/
+dataset
+docker-compose.yml

@@ -26,11 +26,12 @@ SCHEDULE_PATH = os.getenv("CONTROLLER_SCHEDULE_PATH", default= '/schedule')
 RESULT_PATH = os.getenv("CONTROLLER_RESULT_PATH", default='/result')
 STATUS_PATH = "/status_update"
 MAX_RETRY_ATTEMPTS = 3
-LOG_FOLDER_NAME = "manager_logs"
+LOG_FOLDER_NAME = "../manager_logs"
 BENCHMARK_DOCKER_COMPOSE_TEMPLATE='docker-compose-template.yml'
 EXEUCTION_FREQUENCY_SECONDS = int(os.getenv("EXECUTION_FREQUENCY_SECONDS", default=30))
 
 SOLUTION_CONTAINER_NAME_PREFIX = 'solution-app-'
+GRADER_CONTAINER_NAME = 'benchmark-grader'
 # Docker image IDs are strings with the format team/image
 # This variable chooses which of the two parts will be used for identification in manager executions of the image
 DOCKER_IMAGE_IDENTIFIER = 'team' 
@@ -91,7 +92,7 @@ class Manager:
         return ip
 
     def execute(self, cmd):
-        '''Execute an external command as a subprocess and print its stdout in real time
+        '''Generator function that executes an external command as a subprocess and return its stdout
         Sets the benchmark_return_code equal to the command return code
         '''
         popen = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
@@ -111,6 +112,7 @@ class Manager:
             dockerConfig = yaml.safe_load(f)
         dockerConfig["services"]["solution"]["container_name"] = container
         dockerConfig["services"]["solution"]["image"] = image
+        dockerConfig["services"]["grader"]["container_name"] = GRADER_CONTAINER_NAME
 
         with open('docker-compose.yml', 'w') as f:
             yaml.dump(dockerConfig, f, default_flow_style=False)
@@ -144,8 +146,8 @@ class Manager:
                     continue
         return updated_images
 
-    def save_container_log(self, cmd, docker_image, extension):
-        '''Execute a command and store its output in a log file corresponding to the image name
+    def save_container_logs(self, cmd, docker_image, extension):
+        '''Execute a command and store its output in a log file corresponding to the image name.
         '''
         imageKey =  extractDockerImageID(docker_image)
         path = "../logs/" + imageKey
@@ -203,15 +205,14 @@ class Manager:
     def start(self):
         self.logger.info("----------------------------")
         self.logger.info("Benchmark Manager started...")
-        grader_container_name = "benchmark-server-self.logger"
         solution_container_name = 'undefined'
 
         # requesting schedule
         images = self.get_images()
 
         try:
-            subprocess.Popen(['docker', 'stop', grader_container_name], stderr=subprocess.PIPE)
-            subprocess.Popen(['docker', 'rm', grader_container_name], stderr=subprocess.PIPE)
+            subprocess.Popen(['docker', 'stop', GRADER_CONTAINER_NAME], stderr=subprocess.PIPE)
+            subprocess.Popen(['docker', 'rm', GRADER_CONTAINER_NAME], stderr=subprocess.PIPE)
         except subprocess.CalledProcessError as e:
             self.logger.debug("Cleaning up unused containers, if they are left")
             self.logger.debug("Got cleanup error: %s. Proceeding!" % e)
@@ -249,7 +250,6 @@ class Manager:
             self.post_status({solution_image: "Running experiment"})
 
             cmd = ['docker-compose', 'up', '--build', '--abort-on-container-exit']
-            # real-time output
             for path in self.execute(cmd):
                 self.logger.info(path)
                 sys.stdout.flush()
@@ -259,9 +259,9 @@ class Manager:
             self.post_status({solution_image: "Preparing results"})
 
             solutionLogsCmd = 'docker logs ' + solution_container_name
-            self.save_container_log(solutionLogsCmd, solution_image, SOLUTION_CONTAINER_LOG_EXTENSION)
-            graderLogsCmd = 'docker logs ' + grader_container_name
-            self.save_container_log(graderLogsCmd, solution_image, GRADER_CONTAINER_LOG_EXTENSION)
+            self.save_container_logs(solutionLogsCmd, solution_image, SOLUTION_CONTAINER_LOG_EXTENSION)
+            graderLogsCmd = 'docker logs ' + GRADER_CONTAINER_NAME
+            self.save_container_logs(graderLogsCmd, solution_image, GRADER_CONTAINER_LOG_EXTENSION)
             self.logger.debug("Container logs saved")
 
             self.logger.info("Image %s completed " % solution_image)
@@ -275,7 +275,7 @@ class Manager:
                      self.post_status({solution_image: "Retrying"})
                      continue
                 else:
-                    self.retry_attempts[solution_image] = self.retry_attempt.get(solution_image,0)
+                    self.retry_attempts[solution_image] = self.retry_attempts.get(solution_image,0)
 
             self.logger.info("Retry attempts: %s " % self.retry_attempts)
 

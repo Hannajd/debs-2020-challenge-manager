@@ -16,9 +16,9 @@ You can set up them in [this .env file](server_app/.env)!
 
 `Additional variables` can be set in [main docker-compose file](./docker-compose-manager.yml)
 
-  MANAGER_SLEEP_TIME, API endpoint, and default API routes that are queried.
+  EXECUTION_FREQUENCY_SECONDS, controller endpoint URI, and default controller API routes that are queried.
 
-  `Important!` make sure API endpoint is set correctly.
+  `Important!` make sure the controller URI is set correctly.
 
 <br>
 Run with:

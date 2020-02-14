@@ -1,0 +1,18 @@
+version: "3"
+services:
+  manager:
+    container_name: manager
+    build:
+      context: .
+      dockerfile: Dockerfile.manager
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./benchmark:/benchmark
+      - ./manager_logs:/manager_logs
+      - ./logs:/logs
+
+    environment:
+      EXECUTION_FREQUENCY_SECONDS: 30
+      CONTROLLER_URI: host.docker.internal
+      CONTROLLER_RESULT_PATH: /result
+      CONTROLLER_SCHEDULE_PATH: /schedule
