@@ -42,4 +42,4 @@ WORKDIR /server_app
 #VOLUME ./manager_logs /manager_logs
 #VOLUME ../logs /logs
 
-CMD ["python3", "../manager.py"]
+CMD ["python3", "-u", "../manager.py"]
