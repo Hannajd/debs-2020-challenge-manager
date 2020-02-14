@@ -18,8 +18,7 @@ pymysql.install_as_MySQLdb()
 
 LOG_FORMAT='%(asctime)s - %(name)s - %(threadName)s -  %(levelname)s - %(message)s'
 LOG_FILENAME = 'compose_manager.log'
-FILE_LOG_LEVEL=logging.DEBUG
-STDOUT_LOG_LEVEL=logging.ERROR
+LOG_LEVEL=logging.DEBUG
 GRADER_CONTAINER_LOG_EXTENSION = '_grader_container.log'
 SOLUTION_CONTAINER_LOG_EXTENSION = '_solution_container.log'
 CONTROLLER_URI = os.getenv("CONTROLLER_URI")
@@ -70,22 +69,16 @@ class Manager:
         # specify (CONTROLLER_URI: host.docker.internal)
         if "docker" in self.endpoint:
             self.endpoint = 'http://' + self.endpoint + ":8080"
-
         self.logger.debug("Controller endpoint: %s" % self.endpoint)
 
     def create_logs(self):
             if not os.path.exists(LOG_FOLDER_NAME):
                 os.makedirs(LOG_FOLDER_NAME)
+            logging.basicConfig(format=LOG_FORMAT,
+                                level=LOG_LEVEL,
+                                handlers=[TimedRotatingFileHandler("%s/%s" % (LOG_FOLDER_NAME, LOG_FILENAME), when="midnight", interval=1),
+                                logging.StreamHandler()])
             logger = logging.getLogger()
-            formatter = logging.Formatter(LOG_FORMAT)
-            fileHandler = TimedRotatingFileHandler("%s/%s" % (LOG_FOLDER_NAME, LOG_FILENAME), when="midnight", interval=1)
-            fileHandler.setLevel(FILE_LOG_LEVEL)
-            fileHandler.setFormatter(formatter)
-            streamHandler = logging.StreamHandler()
-            streamHandler.setLevel(STDOUT_LOG_LEVEL)
-            streamHandler.setFormatter(formatter)
-            logger.addHandler(streamHandler)
-            logger.addHandler(fileHandler) 
             return logger
 
     def find_container_ip_addr(self, container_name):
@@ -113,11 +106,11 @@ class Manager:
     def create_docker_compose_file(self, image, container):
         '''Create a new docker-compose.yml for the benchmark execution based on the template file and the settings
         '''
-        self.logger.info("creating docker-compose with image: %s and container: %s " % (image, container))
+        self.logger.info("Creating docker-compose with image: '%s' and container name: '%s'" % (image, container))
         with open(BENCHMARK_DOCKER_COMPOSE_TEMPLATE) as f:
             dockerConfig = yaml.safe_load(f)
-        dockerConfig["services"]["client"]["container_name"] = container
-        dockerConfig["services"]["client"]["image"] = image
+        dockerConfig["services"]["solution"]["container_name"] = container
+        dockerConfig["services"]["solution"]["image"] = image
 
         with open('docker-compose.yml', 'w') as f:
             yaml.dump(dockerConfig, f, default_flow_style=False)
@@ -154,7 +147,7 @@ class Manager:
     def save_container_log(self, cmd, docker_image, extension):
         '''Execute a command and store its output in a log file corresponding to the image name
         '''
-        imageKey =  docker_image.split('/')[SPLIT_PART]  
+        imageKey =  extractDockerImageID(docker_image)
         path = "../logs/" + imageKey
         filename = path + "/" + imageKey + extension
         if not os.path.exists(path):
@@ -242,14 +235,13 @@ class Manager:
                 self.logger.info("Pulling image '%s'" % solution_image)
                 self.post_status({solution_image: "Pulling image"})
                 pullOutput = subprocess.check_output(['docker', 'pull', solution_image], stderr=subprocess.STDOUT)
-                self.logger.debug('docker pull %s: %s', (solution_image, pullOutput))
+                self.logger.debug('docker pull %s: %s', solution_image, pullOutput)
                 self.logger.debug("Inspecting image '%s'" % solution_image)
                 inspectOutput = subprocess.check_output(['docker', 'inspect', solution_image], stderr=subprocess.STDOUT)
-                self.logger.debug('docker inspect %s: %s', (solution_image, inspectOutput))
                 tag = json.loads(inspectOutput.decode('utf-8'))[0]["Id"]
                 self.logger.info("Image tag is : %s" % tag)
             except Exception as e:
-                self.logger.error("Error accessing image: %s: %s" % (solution_image, e))
+                self.logger.error("Error accessing image: %s: %s", solution_image, e)
                 continue
 
             self.create_docker_compose_file(solution_image, solution_container_name)
@@ -276,7 +268,7 @@ class Manager:
             team_result = self.process_result(solution_image, tag)
 
             if self.benchmark_return_code and self.client_progress_status == 0:
-                self.logger.error("Docker-compose exited with code %s" % self.benchmark_return_code)
+                self.logger.error("docker-compose exited with code %s" % self.benchmark_return_code)
                 self.logger.warning("Will retry on the next run")
                 if self.retry_attempts.get(solution_image,0) <= MAX_RETRY_ATTEMPTS:
                      self.retry_attempts[solution_image] = self.retry_attempts.get(solution_image,0) + 1
