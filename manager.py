@@ -15,11 +15,7 @@ import requests
 import pymysql
 pymysql.install_as_MySQLdb()
 
-SPLIT_PART = 0 # !!! of string part of dockerhub image_name.split("/")[SPLIT_PART]
-# 1) for testing withing multiple containers in one docker repo
-# 0) for running over multiple docker repos
 
-# HOST = "http://127.0.0.1:8080"
 LOG_FORMAT='%(asctime)s - %(name)s - %(threadName)s -  %(levelname)s - %(message)s'
 LOG_FILENAME = 'compose_manager.log'
 FILE_LOG_LEVEL=logging.DEBUG
@@ -34,6 +30,24 @@ MAX_RETRY_ATTEMPTS = 3
 LOG_FOLDER_NAME = "manager_logs"
 BENCHMARK_DOCKER_COMPOSE_TEMPLATE='docker-compose-template.yml'
 EXEUCTION_FREQUENCY_SECONDS = int(os.getenv("EXECUTION_FREQUENCY_SECONDS", default=30))
+
+SOLUTION_CONTAINER_NAME_PREFIX = 'solution-app-'
+# Docker image IDs are strings with the format team/image
+# This variable chooses which of the two parts will be used for identification in manager executions of the image
+DOCKER_IMAGE_IDENTIFIER = 'team' 
+
+def extractDockerImageID(image):
+    '''Extract either of the team or the image part out of a docker image ID of the form "team/image"
+    Uses the global variable DOCKER_IMAGE_IDENTIFIER to perform the selection
+    '''
+    if DOCKER_IMAGE_IDENTIFIER == 'team':
+        index = 0
+    elif DOCKER_IMAGE_IDENTIFIER == 'image':
+        index = 1
+    else:
+        raise ValueError('Unknown DOCKER_IMAGE_IDENTIFIER: %s' % DOCKER_IMAGE_IDENTIFIER)
+    return image.split('/')[index]
+
 
 class Manager:
 
@@ -174,7 +188,7 @@ class Manager:
         else:
             rootdir = "../logs"
 
-        path = docker_image.split('/')[SPLIT_PART]
+        path = extractDockerImageID(docker_image)
         list_of_files = os.listdir(rootdir+"/"+path)
         # print("files", list_of_files)
         list_of_files = [i for i in list_of_files if ".json" in i]
@@ -197,7 +211,7 @@ class Manager:
         self.logger.info("----------------------------")
         self.logger.info("Benchmark Manager started...")
         grader_container_name = "benchmark-server-self.logger"
-        client_container_name = "client-app-"
+        solution_container_name = 'undefined'
 
         # requesting schedule
         images = self.get_images()
@@ -215,11 +229,14 @@ class Manager:
                       # might be too slow to establish a connection
 
         for solution_image in images:
+
+            solution_container_name = SOLUTION_CONTAINER_NAME_PREFIX + extractDockerImageID(solution_image)
+
             try:
-                subprocess.check_output(['docker', 'rm', client_container_name+solution_image.split("/")[SPLIT_PART]])
-            except Exception as e:
                 self.logger.debug("Cleaning up unused client containers, if they are left")
-                self.logger.debug("Got client cleanup error: %s. Proceeding!" % e)
+                self.logger.debug(subprocess.check_output(['docker', 'rm', solution_container_name]))
+            except Exception as e:
+                self.logger.info("Got client cleanup error: %s. Proceeding!" % e)
 
             try:
                 self.logger.info("Pulling image '%s'" % solution_image)
@@ -229,21 +246,19 @@ class Manager:
                 self.logger.debug("Inspecting image '%s'" % solution_image)
                 inspectOutput = subprocess.check_output(['docker', 'inspect', solution_image], stderr=subprocess.STDOUT)
                 self.logger.debug('docker inspect %s: %s', (solution_image, inspectOutput))
-                tag = json.loads(tagOutput.decode('utf-8'))[0]["Id"]
+                tag = json.loads(inspectOutput.decode('utf-8'))[0]["Id"]
                 self.logger.info("Image tag is : %s" % tag)
             except Exception as e:
                 self.logger.error("Error accessing image: %s: %s" % (solution_image, e))
                 continue
 
-            container_name = client_container_name+solution_image.split("/")[SPLIT_PART]
-            self.create_docker_compose_file(solution_image, container_name) #TODO change for [0] for client repo name
+            self.create_docker_compose_file(solution_image, solution_container_name)
 
             self.post_status({solution_image: "Running experiment"})
 
             cmd = ['docker-compose', 'up', '--build', '--abort-on-container-exit']
             # real-time output
             for path in self.execute(cmd):
-                # print(path, "")
                 self.logger.info(path)
                 sys.stdout.flush()
 
@@ -251,9 +266,7 @@ class Manager:
             self.logger.debug("docker-compose exited")
             self.post_status({solution_image: "Preparing results"})
 
-            client_container = client_container_name+solution_image.split("/")[SPLIT_PART]
-
-            solutionLogsCmd = 'docker logs ' + client_container
+            solutionLogsCmd = 'docker logs ' + solution_container_name
             self.save_container_log(solutionLogsCmd, solution_image, SOLUTION_CONTAINER_LOG_EXTENSION)
             graderLogsCmd = 'docker logs ' + grader_container_name
             self.save_container_log(graderLogsCmd, solution_image, GRADER_CONTAINER_LOG_EXTENSION)
@@ -272,14 +285,14 @@ class Manager:
                 else:
                     self.retry_attempts[solution_image] = self.retry_attempt.get(solution_image,0)
 
-            self.logger.info("retry dict is: %s " % self.retry_attempts)
+            self.logger.info("Retry attempts: %s " % self.retry_attempts)
 
             self.post_status({solution_image: "Ready"})
             self.post_result(team_result)
 
-            self.logger.info("Completed run for %s" % solution_image)
+            self.logger.info("Completed run for image: %s" % solution_image)
 
-        self.logger.info("Evaluation completed.")
+        self.logger.info("Evaluation completed!")
         images = []
         return
 
