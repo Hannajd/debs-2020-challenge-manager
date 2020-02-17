@@ -56,8 +56,7 @@ class Manager:
         # used to encode datetime objects
         json.JSONEncoder.default = lambda self,obj: (obj.isoformat() if isinstance(obj, datetime.datetime) else None)
         self.images = []
-        self.retry_attempts = {} #for each image
-        self.client_progress_status = 0 #how many scenes processed until now
+        self.retry_attempts = {} # for each image
 
         self.logger = self.create_logs()
 
@@ -112,7 +111,7 @@ class Manager:
         BENCHMARK_HARD_TIMEOUT_SECONDS = int(os.getenv('BENCHMARK_HARD_TIMEOUT_SECONDS'))
         BENCHMARK_CONTAINER_DATASET_PATH = os.getenv('BENCHMARK_CONTAINER_DATASET_PATH')
         HOST_DATASET_PATH = os.getenv('HOST_DATASET_PATH')
-        BENCHMARK_CONTAINER_RESULTS_PATH= os.getenv('BENCHMARK_CONTAINER_RESULTS_PATH')
+        BENCHMARK_CONTAINER_RESULTS_BASE_PATH= os.getenv('BENCHMARK_CONTAINER_RESULTS_BASE_PATH')
         with open(BENCHMARK_DOCKER_COMPOSE_TEMPLATE) as f:
             dockerConfig = yaml.safe_load(f)
         solutionConfig = dockerConfig["services"]["solution"]
@@ -123,9 +122,11 @@ class Manager:
         graderConfig["container_name"] = GRADER_CONTAINER_NAME
         graderConfig["environment"]["HARD_TIMEOUT_SECONDS"] = BENCHMARK_HARD_TIMEOUT_SECONDS
         graderConfig["environment"]["DATASET_PATH"] = BENCHMARK_CONTAINER_DATASET_PATH
-        graderConfig["environment"]["RESULTS_PATH"] = BENCHMARK_CONTAINER_RESULTS_PATH
+        fullContainerResultsPath = BENCHMARK_CONTAINER_RESULTS_BASE_PATH + '/' + extractDockerImageID(image)
+        self.logger.info('Results for %s will be stored in %s', image, fullContainerResultsPath)
+        graderConfig["environment"]["RESULTS_PATH"] = fullContainerResultsPath
         graderConfig["volumes"][0] = '%s:%s' % (HOST_DATASET_PATH, BENCHMARK_CONTAINER_DATASET_PATH)
-        graderConfig["volumes"][1] = '%s:%s' % (RESULTS_PATH, BENCHMARK_CONTAINER_RESULTS_PATH)
+        graderConfig["volumes"][1] = '%s:%s' % (RESULTS_PATH, BENCHMARK_CONTAINER_RESULTS_BASE_PATH)
 
         with open('docker-compose.yml', 'w') as f:
             yaml.dump(dockerConfig, f, default_flow_style=False)
@@ -153,7 +154,7 @@ class Manager:
             if status == 'updated':
                 try:
                     updated_images.append(image)
-                    self.post_status({image:"Queued"})
+                    self.post_message(STATUS_ENDPOINT, {image:"Queued"})
                 except IndexError:
                     self.logger.error('Incorrectly specified image encountered. Format is {team_repo/team_image}')
                     continue
@@ -163,7 +164,7 @@ class Manager:
         '''Execute a command and store its output in a log file corresponding to the image name.
         '''
         imageKey =  extractDockerImageID(docker_image)
-        path = "../logs/" + imageKey
+        path = CONTAINER_LOGS_PATH + imageKey
         filename = path + "/" + imageKey + extension
         if not os.path.exists(path):
             os.makedirs(path)
@@ -172,47 +173,42 @@ class Manager:
             p.wait()
 
     def process_result(self, docker_img_name, image_tag):
-            global EXEUCTION_FREQUENCY_SECONDS
-            self.logger.info("Running image: %s " % docker_img_name)
-            self.logger.info("Extracting results")
-            team_result = self.extract_result_files(docker_img_name)
-            if team_result:
-                team_result['tag'] = image_tag
-                team_result['last_run'] = datetime.datetime.utcnow().replace(microsecond=0).replace(second=0)
-                team_result['piggybacked_manager_timeout'] = EXEUCTION_FREQUENCY_SECONDS
-                self.logger.info("Sending results: %s" % team_result)
-                self.client_progress_status = team_result.get("computed_scenes",0)
-                return team_result
+            self.logger.info("Extracting results from image: %s" % docker_img_name)
+            results = self.extract_result_files(docker_img_name)
+            if results:
+                results['tag'] = image_tag
+                results['last_run'] = datetime.datetime.utcnow().replace(microsecond=0).replace(second=0)
+                results['piggybacked_manager_timeout'] = EXEUCTION_FREQUENCY_SECONDS
+                self.logger.info("Results: %s" % results)
+                return results
             else:
-                self.logger.error("No results after becnhmark run of %s" % docker_img_name)
-                return {'team_image_name': docker_img_name,'computed_scenes':0}
-            sys.stdout.flush()
+                self.logger.error("No results after benchmark run of image %s" % docker_img_name)
+                return {'team_image_name': docker_img_name}
 
     def extract_result_files(self, docker_image):
-        self.logger.info("Looking for log folders")
-        rootdir = "./logs"
-        if "logs" in os.walk(rootdir):
-            pass
-        else:
-            rootdir = "../logs"
-
-        path = extractDockerImageID(docker_image)
-        list_of_files = os.listdir(rootdir+"/"+path)
-        # print("files", list_of_files)
-        list_of_files = [i for i in list_of_files if ".json" in i]
-        if not list_of_files:
-            self.logger.warning('No file result.json yet')
+        self.logger.info("Looking for result files...")
+        imageID = extractDockerImageID(docker_image)
+        executionLogsPath = CONTAINER_LOGS_PATH + '/' + imageID
+        jsonFiles = [f for f in os.listdir(executionLogsPath) if f.endswith('.json')]
+        if not jsonFiles:
+            self.logger.warning('No json result found!')
             return {}
-        fresh_log = list_of_files[0]
-        # print(fresh_log)
-        res_json_folder = rootdir + "/"+ path + "/"
-        new_log = fresh_log.split('.')[0] + "checkedAt" + datetime.datetime.utcnow().strftime("%s") + "."+ fresh_log.split('.')[1]
-        with open(rootdir + "/"+ path + "/" + fresh_log) as f:
+        if len(jsonFiles) != 1:
+            self.logger.warn('Multiple result files found: ' +  jsonFiles) 
+            self.logger.warn('Cleaning up...')
+            for file in jsonFiles:
+                os.remove(file)
+            return {}
+
+        resultsFile = executionLogsPath + '/' + jsonFiles[0]
+        with open(resultsFile) as f:
             data = json.load(f)
             data['team_image_name'] = docker_image
-            self.logger.info("Found data in %s is: %s" % (path, data))
-        subprocess.check_output(['mv', res_json_folder+fresh_log, res_json_folder+new_log])
-        self.logger.info("Removed result file :%s after check" % res_json_folder+new_log)
+            self.logger.info("Found results for %s: %s" % (imageID, data))
+        # Rename result file XX.json to XX.json.DATETIME
+        resultsFileNewName = resultsFile + '.' + datetime.datetime.utcnow().strftime('%s')
+        os.rename(resultsFile, resultsFileNewName)
+        self.logger.info('Archived result file as: %s', resultsFileNewName)
         return data
 
     def start(self):
@@ -247,7 +243,7 @@ class Manager:
 
             try:
                 self.logger.info("Pulling image '%s'" % solution_image)
-                self.post_status({solution_image: "Pulling image"})
+                self.post_message(STATUS_ENDPOINT, {solution_image: "Pulling image"})
                 pullOutput = subprocess.check_output(['docker', 'pull', solution_image], stderr=subprocess.STDOUT)
                 self.logger.debug('docker pull %s: %s', solution_image, pullOutput)
                 self.logger.debug("Inspecting image '%s'" % solution_image)
@@ -260,7 +256,7 @@ class Manager:
 
             self.create_docker_compose_file(solution_image, solution_container_name)
 
-            self.post_status({solution_image: "Running experiment"})
+            self.post_message(STATUS_ENDPOINT, {solution_image: "Running experiment"})
 
             cmd = ['docker-compose', 'up', '--build', '--abort-on-container-exit']
             for path in self.execute(cmd):
@@ -269,7 +265,7 @@ class Manager:
 
 
             self.logger.debug("docker-compose exited")
-            self.post_status({solution_image: "Preparing results"})
+            self.post_message(STATUS_ENDPOINT, {solution_image: "Preparing results"})
 
             solutionLogsCmd = 'docker logs ' + solution_container_name
             self.save_container_logs(solutionLogsCmd, solution_image, SOLUTION_CONTAINER_LOG_EXTENSION)
@@ -278,52 +274,39 @@ class Manager:
             self.logger.debug("Container logs saved")
 
             self.logger.info("Image %s completed " % solution_image)
-            team_result = self.process_result(solution_image, tag)
+            results = self.process_result(solution_image, tag)
 
-            if self.benchmark_return_code and self.client_progress_status == 0:
-                self.logger.error("docker-compose exited with code %s" % self.benchmark_return_code)
-                self.logger.warning("Will retry on the next run")
-                if self.retry_attempts.get(solution_image,0) <= MAX_RETRY_ATTEMPTS:
-                     self.retry_attempts[solution_image] = self.retry_attempts.get(solution_image,0) + 1
-                     self.post_status({solution_image: "Retrying"})
+            if self.benchmark_return_code or not results:
+                self.logger.error("docker-compose exited with code %s, results: %s", self.benchmark_return_code, results)
+                retries = self.retry_attempts.get(solution_image, 0)
+                if retries <= MAX_RETRY_ATTEMPTS:
+                     self.retry_attempts[solution_image] = retries + 1
+                     self.logger.warn('Will retry on next round')
+                     self.post_message(STATUS_ENDPOINT, {solution_image: "Retrying"})
                      continue
                 else:
-                    self.retry_attempts[solution_image] = self.retry_attempts.get(solution_image,0)
+                    self.logger.error('Image has exceeded maximum retry attempts!')
 
             self.logger.info("Retry attempts: %s " % self.retry_attempts)
-
-            self.post_status({solution_image: "Ready"})
-            self.post_result(team_result)
+            self.post_message(STATUS_ENDPOINT, {solution_image: "Ready"})
+            self.post_message(RESULT_ENDPOINT, results)
 
             self.logger.info("Completed run for image: %s" % solution_image)
 
-        self.logger.info("Evaluation completed!")
+        self.logger.info("Evaluation complete!")
         images = []
         return
 
-    def post_result(self, payload):
-        #TODO: Merge with post_status?
+    def post_message(self, endpoint, payload):
         headers = {'Content-type': 'application/json'}
         try:
-            response = requests.post(self.endpoint + RESULT_ENDPOINT, json = payload, headers=headers)
-
-            if (response.status_code == 201):
-                return {'status': 'success', 'message': 'updated'}
-            if (response.status_code == 404):
-                return {'message': 'Something went wrong. No scene exist. Check if the path is correct'}
-        except requests.exceptions.ConnectionError as e:
-            self.logger.error("Error posting result %s: %s", (payload, e))
-
-    def post_status(self, payload):
-        headers = {'Content-type': 'application/json'}
-        try:
-            response = requests.post(self.endpoint + STATUS_ENDPOINT, json = payload, headers=headers)
+            response = requests.post(self.endpoint + endpoint, json = payload, headers=headers)
             if (response.status_code == 201):
                 return {'status': 'success', 'message': 'updated'}
             else:
                 return {'status': response.status_code}
         except requests.exceptions.ConnectionError as e:
-            self.logger.error("Error posting status %s: %s", (payload, e))
+            self.logger.error("Error posting payload '%s' at %s: %s", payload, endpoint, e)
 
 
 if __name__ == '__main__':
