@@ -24,13 +24,12 @@ SOLUTION_CONTAINER_LOG_EXTENSION = '_solution_container.log'
 CONTROLLER_URI = os.getenv("CONTROLLER_URI")
 SCHEDULE_ENDPOINT = os.getenv("CONTROLLER_SCHEDULE_ENDPOINT", default= '/schedule')
 RESULT_ENDPOINT = os.getenv("CONTROLLER_RESULT_ENDPOINT", default='/result')
-STATUS_ENDPOINT = "/status_update"
+STATUS_ENDPOINT = os.getenv("CONTROLLER_STATUS_ENDPOINT", default="/status_update")
 MAX_RETRY_ATTEMPTS = 3
 CONTAINER_LOGS_PATH='../logs'
 MANAGER_LOGS_PATH = "../manager_logs"
 BENCHMARK_DOCKER_COMPOSE_TEMPLATE='docker-compose-template.yml'
 EXEUCTION_FREQUENCY_SECONDS = int(os.getenv("EXECUTION_FREQUENCY_SECONDS", default=30))
-RESULTS_PATH = os.getenv('HOST_RESULTS_PATH')
 SOLUTION_CONTAINER_NAME_PREFIX = 'solution-app-'
 GRADER_CONTAINER_NAME = 'debs-2020-grader'
 # Docker image IDs are strings with the format team/image
@@ -70,7 +69,7 @@ class Manager:
         # specify (CONTROLLER_URI: host.docker.internal)
         if "docker" in self.endpoint:
             self.endpoint = 'http://' + self.endpoint + ":8080"
-        self.logger.debug("Controller endpoint: %s" % self.endpoint)
+        self.logger.debug("Controller URI: %s" % self.endpoint)
 
     def create_logs(self):
             if not os.path.exists(MANAGER_LOGS_PATH):
@@ -111,7 +110,8 @@ class Manager:
         BENCHMARK_HARD_TIMEOUT_SECONDS = int(os.getenv('BENCHMARK_HARD_TIMEOUT_SECONDS'))
         BENCHMARK_CONTAINER_DATASET_PATH = os.getenv('BENCHMARK_CONTAINER_DATASET_PATH')
         HOST_DATASET_PATH = os.getenv('HOST_DATASET_PATH')
-        BENCHMARK_CONTAINER_RESULTS_BASE_PATH= os.getenv('BENCHMARK_CONTAINER_RESULTS_BASE_PATH')
+        HOST_BENCHMARK_LOGS_PATH = os.getenv('HOST_BENCHMARK_LOGS_PATH')
+        BENCHMARK_CONTAINER_RESULTS_BASE_PATH = os.getenv('BENCHMARK_CONTAINER_RESULTS_BASE_PATH')
         with open(BENCHMARK_DOCKER_COMPOSE_TEMPLATE) as f:
             dockerConfig = yaml.safe_load(f)
         solutionConfig = dockerConfig["services"]["solution"]
@@ -126,7 +126,7 @@ class Manager:
         self.logger.info('Results for %s will be stored in %s', image, fullContainerResultsPath)
         graderConfig["environment"]["RESULTS_PATH"] = fullContainerResultsPath
         graderConfig["volumes"][0] = '%s:%s' % (HOST_DATASET_PATH, BENCHMARK_CONTAINER_DATASET_PATH)
-        graderConfig["volumes"][1] = '%s:%s' % (RESULTS_PATH, BENCHMARK_CONTAINER_RESULTS_BASE_PATH)
+        graderConfig["volumes"][1] = '%s:%s' % (HOST_BENCHMARK_LOGS_PATH, BENCHMARK_CONTAINER_RESULTS_BASE_PATH)
 
         with open('docker-compose.yml', 'w') as f:
             yaml.dump(dockerConfig, f, default_flow_style=False)
