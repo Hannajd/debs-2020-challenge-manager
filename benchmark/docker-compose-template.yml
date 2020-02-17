@@ -1,0 +1,26 @@
+version: "3"
+services:
+  grader:
+    image: palyvos/debs-2020-challenge-grader:experimental
+    container_name: AUTO_GENERATED_FIELD
+    environment: 
+      HARD_TIMEOUT_SECONDS: AUTO_GENERATED_FIELD
+      DATASET_PATH: AUTO_GENERATED_FIELD
+      RESULT_FILE_PATH: AUTO_GENERATED_FIELD
+    volumes:
+      - AUTO_GENERATED_FIELD
+      - AUTO_GENERATED_FIELD
+    networks:
+      - bench
+  solution:
+    image: AUTO_GENERATED_FIELD
+    container_name: AUTO_GENERATED_FIELD
+    environment:
+      BENCHMARK_SYSTEM_URL: "grader"
+    depends_on:
+      - grader
+    networks:
+      - bench
+
+networks:
+  bench: {}

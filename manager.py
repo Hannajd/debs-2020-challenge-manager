@@ -22,16 +22,17 @@ LOG_LEVEL=logging.DEBUG
 GRADER_CONTAINER_LOG_EXTENSION = '_grader_container.log'
 SOLUTION_CONTAINER_LOG_EXTENSION = '_solution_container.log'
 CONTROLLER_URI = os.getenv("CONTROLLER_URI")
-SCHEDULE_PATH = os.getenv("CONTROLLER_SCHEDULE_PATH", default= '/schedule')
-RESULT_PATH = os.getenv("CONTROLLER_RESULT_PATH", default='/result')
-STATUS_PATH = "/status_update"
+SCHEDULE_ENDPOINT = os.getenv("CONTROLLER_SCHEDULE_ENDPOINT", default= '/schedule')
+RESULT_ENDPOINT = os.getenv("CONTROLLER_RESULT_ENDPOINT", default='/result')
+STATUS_ENDPOINT = "/status_update"
 MAX_RETRY_ATTEMPTS = 3
-LOG_FOLDER_NAME = "../manager_logs"
+CONTAINER_LOGS_PATH='../logs'
+MANAGER_LOGS_PATH = "../manager_logs"
 BENCHMARK_DOCKER_COMPOSE_TEMPLATE='docker-compose-template.yml'
 EXEUCTION_FREQUENCY_SECONDS = int(os.getenv("EXECUTION_FREQUENCY_SECONDS", default=30))
-
+RESULTS_PATH = os.getenv('HOST_RESULTS_PATH')
 SOLUTION_CONTAINER_NAME_PREFIX = 'solution-app-'
-GRADER_CONTAINER_NAME = 'benchmark-grader'
+GRADER_CONTAINER_NAME = 'debs-2020-grader'
 # Docker image IDs are strings with the format team/image
 # This variable chooses which of the two parts will be used for identification in manager executions of the image
 DOCKER_IMAGE_IDENTIFIER = 'team' 
@@ -73,11 +74,11 @@ class Manager:
         self.logger.debug("Controller endpoint: %s" % self.endpoint)
 
     def create_logs(self):
-            if not os.path.exists(LOG_FOLDER_NAME):
-                os.makedirs(LOG_FOLDER_NAME)
+            if not os.path.exists(MANAGER_LOGS_PATH):
+                os.makedirs(MANAGER_LOGS_PATH)
             logging.basicConfig(format=LOG_FORMAT,
                                 level=LOG_LEVEL,
-                                handlers=[TimedRotatingFileHandler("%s/%s" % (LOG_FOLDER_NAME, LOG_FILENAME), when="midnight", interval=1),
+                                handlers=[TimedRotatingFileHandler("%s/%s" % (MANAGER_LOGS_PATH, LOG_FILENAME), when="midnight", interval=1),
                                 logging.StreamHandler()])
             logger = logging.getLogger()
             return logger
@@ -108,11 +109,23 @@ class Manager:
         '''Create a new docker-compose.yml for the benchmark execution based on the template file and the settings
         '''
         self.logger.info("Creating docker-compose with image: '%s' and container name: '%s'" % (image, container))
+        BENCHMARK_HARD_TIMEOUT_SECONDS = int(os.getenv('BENCHMARK_HARD_TIMEOUT_SECONDS'))
+        BENCHMARK_CONTAINER_DATASET_PATH = os.getenv('BENCHMARK_CONTAINER_DATASET_PATH')
+        HOST_DATASET_PATH = os.getenv('HOST_DATASET_PATH')
+        BENCHMARK_CONTAINER_RESULTS_PATH= os.getenv('BENCHMARK_CONTAINER_RESULTS_PATH')
         with open(BENCHMARK_DOCKER_COMPOSE_TEMPLATE) as f:
             dockerConfig = yaml.safe_load(f)
-        dockerConfig["services"]["solution"]["container_name"] = container
-        dockerConfig["services"]["solution"]["image"] = image
-        dockerConfig["services"]["grader"]["container_name"] = GRADER_CONTAINER_NAME
+        solutionConfig = dockerConfig["services"]["solution"]
+        solutionConfig["container_name"] = container
+        solutionConfig["image"] = image
+
+        graderConfig = dockerConfig["services"]["grader"]
+        graderConfig["container_name"] = GRADER_CONTAINER_NAME
+        graderConfig["environment"]["HARD_TIMEOUT_SECONDS"] = BENCHMARK_HARD_TIMEOUT_SECONDS
+        graderConfig["environment"]["DATASET_PATH"] = BENCHMARK_CONTAINER_DATASET_PATH
+        graderConfig["environment"]["RESULTS_PATH"] = BENCHMARK_CONTAINER_RESULTS_PATH
+        graderConfig["volumes"][0] = '%s:%s' % (HOST_DATASET_PATH, BENCHMARK_CONTAINER_DATASET_PATH)
+        graderConfig["volumes"][1] = '%s:%s' % (RESULTS_PATH, BENCHMARK_CONTAINER_RESULTS_PATH)
 
         with open('docker-compose.yml', 'w') as f:
             yaml.dump(dockerConfig, f, default_flow_style=False)
@@ -122,7 +135,7 @@ class Manager:
         '''Retrieve the updated image URLs from the controller.
         '''
         updated_images = []
-        response = requests.get(self.endpoint + SCHEDULE_PATH)
+        response = requests.get(self.endpoint + SCHEDULE_ENDPOINT)
         self.logger.info("Scheduler answer status %s " % response.status_code)
 
         if (response.status_code == 403):
@@ -292,7 +305,7 @@ class Manager:
         #TODO: Merge with post_status?
         headers = {'Content-type': 'application/json'}
         try:
-            response = requests.post(self.endpoint + RESULT_PATH, json = payload, headers=headers)
+            response = requests.post(self.endpoint + RESULT_ENDPOINT, json = payload, headers=headers)
 
             if (response.status_code == 201):
                 return {'status': 'success', 'message': 'updated'}
@@ -304,7 +317,7 @@ class Manager:
     def post_status(self, payload):
         headers = {'Content-type': 'application/json'}
         try:
-            response = requests.post(self.endpoint + STATUS_PATH, json = payload, headers=headers)
+            response = requests.post(self.endpoint + STATUS_ENDPOINT, json = payload, headers=headers)
             if (response.status_code == 201):
                 return {'status': 'success', 'message': 'updated'}
             else:

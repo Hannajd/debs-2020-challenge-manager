@@ -11,8 +11,6 @@ services:
       - ./manager_logs:/manager_logs
       - ./logs:/logs
 
-    environment:
-      EXECUTION_FREQUENCY_SECONDS: 30
-      CONTROLLER_URI: host.docker.internal
-      CONTROLLER_RESULT_PATH: /result
-      CONTROLLER_SCHEDULE_PATH: /schedule
+    env_file:
+      - container-config.env
+
