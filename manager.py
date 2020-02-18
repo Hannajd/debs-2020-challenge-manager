@@ -183,7 +183,7 @@ class Manager:
                 return results
             else:
                 self.logger.error("No results after benchmark run of image %s" % docker_img_name)
-                return {'team_image_name': docker_img_name}
+                return {'image': docker_img_name}
 
     def extract_result_files(self, docker_image):
         self.logger.info("Looking for result files...")
@@ -203,7 +203,7 @@ class Manager:
         resultsFile = executionLogsPath + '/' + jsonFiles[0]
         with open(resultsFile) as f:
             data = json.load(f)
-            data['team_image_name'] = docker_image
+            data['image'] = docker_image
             self.logger.info("Found results for %s: %s" % (imageID, data))
         # Rename result file XX.json to XX.json.DATETIME
         resultsFileNewName = resultsFile + '.' + datetime.datetime.utcnow().strftime('%s')
