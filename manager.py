@@ -172,12 +172,13 @@ class Manager:
             p = subprocess.Popen(cmd, shell=True, universal_newlines=True, stdout=f, stderr=subprocess.STDOUT)
             p.wait()
 
-    def process_result(self, docker_img_name, image_tag):
+    def process_result(self, docker_img_name, image_tag, benchmark_runtime):
             self.logger.info("Extracting results from image: %s" % docker_img_name)
             results = self.extract_result_files(docker_img_name)
             if results:
                 results['tag'] = image_tag
                 results['last_run'] = datetime.datetime.utcnow().replace(microsecond=0).replace(second=0)
+                results['benchmark_runtime'] = benchmark_runtime
                 results['piggybacked_manager_timeout'] = EXEUCTION_FREQUENCY_SECONDS
                 self.logger.info("Results: %s" % results)
                 return results
@@ -259,10 +260,12 @@ class Manager:
             self.post_message(STATUS_ENDPOINT, {solution_image: "Running experiment"})
 
             cmd = ['docker-compose', 'up', '--build', '--abort-on-container-exit']
-            for path in self.execute(cmd):
-                self.logger.info(path)
-                sys.stdout.flush()
 
+            benchmark_start_time = time.time()
+            for output in self.execute(cmd):
+                self.logger.info(output)
+                sys.stdout.flush()
+            benchmark_runtime = time.time() - benchmark_start_time
 
             self.logger.debug("docker-compose exited")
             self.post_message(STATUS_ENDPOINT, {solution_image: "Preparing results"})
@@ -274,7 +277,7 @@ class Manager:
             self.logger.debug("Container logs saved")
 
             self.logger.info("Image %s completed " % solution_image)
-            results = self.process_result(solution_image, tag)
+            results = self.process_result(solution_image, tag, benchmark_runtime)
 
             if self.benchmark_return_code or not results:
                 self.logger.error("docker-compose exited with code %s, results: %s", self.benchmark_return_code, results)
