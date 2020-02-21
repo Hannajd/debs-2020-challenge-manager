@@ -221,12 +221,11 @@ class Manager:
         images = self.get_images()
 
         try:
+            self.logger.debug("Cleaning up old graders...")
             subprocess.Popen(['docker', 'stop', GRADER_CONTAINER_NAME], stderr=subprocess.PIPE)
             subprocess.Popen(['docker', 'rm', GRADER_CONTAINER_NAME], stderr=subprocess.PIPE)
         except subprocess.CalledProcessError as e:
-            self.logger.debug("Cleaning up unused containers, if they are left")
-            self.logger.debug("Got cleanup error: %s. Proceeding!" % e)
-            pass
+            self.logger.debug("Cleanup error: %s. Proceeding!", e)
 
         self.logger.info("Current scheduled images: %s" % images)
         time.sleep(5) # not necessary but if manager rerun, sometimes first image
@@ -237,16 +236,16 @@ class Manager:
             solution_container_name = SOLUTION_CONTAINER_NAME_PREFIX + extractDockerImageID(solution_image)
 
             try:
-                self.logger.debug("Cleaning up unused client containers, if they are left")
-                self.logger.debug(subprocess.check_output(['docker', 'rm', solution_container_name]))
+                self.logger.debug("Cleaning up unused solution containers, if they are left")
+                subprocess.check_output(['docker', 'rm', solution_container_name])
             except Exception as e:
-                self.logger.info("Got client cleanup error: %s. Proceeding!" % e)
+                self.logger.info("Cleanup error: %s. Proceeding!", e)
 
             try:
-                self.logger.info("Pulling image '%s'" % solution_image)
+                self.logger.info("Pulling image '%s'", solution_image)
                 self.post_message(STATUS_ENDPOINT, {solution_image: "Pulling image"})
-                pullOutput = subprocess.check_output(['docker', 'pull', solution_image], stderr=subprocess.STDOUT)
-                self.logger.debug('docker pull %s: %s', solution_image, pullOutput)
+                pullOutput = subprocess.check_output(['docker-compose', 'pull'], stderr=subprocess.STDOUT)
+                self.logger.debug(pullOutput)
                 self.logger.debug("Inspecting image '%s'" % solution_image)
                 inspectOutput = subprocess.check_output(['docker', 'inspect', solution_image], stderr=subprocess.STDOUT)
                 tag = json.loads(inspectOutput.decode('utf-8'))[0]["Id"]
@@ -259,7 +258,7 @@ class Manager:
 
             self.post_message(STATUS_ENDPOINT, {solution_image: "Running experiment"})
 
-            cmd = ['docker-compose', 'up', '--build', '--abort-on-container-exit']
+            cmd = ['docker-compose', 'up', '--build', '--force-recreate', '--abort-on-container-exit']
 
             benchmark_start_time = time.time()
             for output in self.execute(cmd):

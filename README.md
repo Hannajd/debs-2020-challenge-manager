@@ -12,7 +12,8 @@ Make sure all environmental variables are valid for your experiment. You can set
 ```bash
 # The period between subsequent executions of the manager, in seconds
 EXECUTION_FREQUENCY_SECONDS=30
-# The URI for the controller (including http://) or "ost.docker.internal" if you are running locally on a Mac
+# The URI for the controller (including http://) or `host.docker.internal` if you are running locally on a Mac
+# Will NOT work with 127.0.0.1!
 CONTROLLER_URI=host.docker.internal
 # The endpoint for submitting results to the controller
 CONTROLLER_RESULT_ENDPOINT=/result
