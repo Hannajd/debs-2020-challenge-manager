@@ -1,7 +1,7 @@
 version: "3"
 services:
   grader:
-    image: palyvos/debs-2020-challenge-grader:experimental
+    image: palyvos/debs-2020-challenge-grader
     container_name: AUTO_GENERATED_FIELD
     environment: 
       HARD_TIMEOUT_SECONDS: AUTO_GENERATED_FIELD
