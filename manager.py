@@ -26,8 +26,8 @@ SCHEDULE_ENDPOINT = os.getenv("CONTROLLER_SCHEDULE_ENDPOINT", default= '/schedul
 RESULT_ENDPOINT = os.getenv("CONTROLLER_RESULT_ENDPOINT", default='/result')
 STATUS_ENDPOINT = os.getenv("CONTROLLER_STATUS_ENDPOINT", default="/status_update")
 MAX_RETRY_ATTEMPTS = 3
-CONTAINER_LOGS_PATH='../logs'
-MANAGER_LOGS_PATH = "../manager_logs"
+CONTAINER_LOGS_PATH = '/logs'
+MANAGER_LOGS_PATH = '/manager_logs/'
 BENCHMARK_DOCKER_COMPOSE_TEMPLATE='docker-compose-template.yml'
 EXEUCTION_FREQUENCY_SECONDS = int(os.getenv("EXECUTION_FREQUENCY_SECONDS", default=30))
 SOLUTION_CONTAINER_NAME_PREFIX = 'solution-app-'
@@ -72,8 +72,7 @@ class Manager:
         self.logger.debug("Controller URI: %s" % self.endpoint)
 
     def create_logs(self):
-            if not os.path.exists(MANAGER_LOGS_PATH):
-                os.makedirs(MANAGER_LOGS_PATH)
+            os.makedirs(MANAGER_LOGS_PATH, exist_ok=True)
             logging.basicConfig(format=LOG_FORMAT,
                                 level=LOG_LEVEL,
                                 handlers=[TimedRotatingFileHandler("%s/%s" % (MANAGER_LOGS_PATH, LOG_FILENAME), when="midnight", interval=1),
@@ -160,14 +159,15 @@ class Manager:
                     continue
         return updated_images
 
+    def solution_logs_path(self, docker_image):
+       return CONTAINER_LOGS_PATH + '/' + extractDockerImageID(docker_image)
+
     def save_container_logs(self, cmd, docker_image, extension):
         '''Execute a command and store its output in a log file corresponding to the image name.
         '''
         imageKey =  extractDockerImageID(docker_image)
-        path = CONTAINER_LOGS_PATH + imageKey
+        path = self.solution_logs_path(docker_image)
         filename = path + "/" + imageKey + extension
-        if not os.path.exists(path):
-            os.makedirs(path)
         with open(filename, "w+") as f:
             p = subprocess.Popen(cmd, shell=True, universal_newlines=True, stdout=f, stderr=subprocess.STDOUT)
             p.wait()
@@ -222,8 +222,8 @@ class Manager:
 
         try:
             self.logger.debug("Cleaning up old graders...")
-            subprocess.Popen(['docker', 'stop', GRADER_CONTAINER_NAME], stderr=subprocess.PIPE)
-            subprocess.Popen(['docker', 'rm', GRADER_CONTAINER_NAME], stderr=subprocess.PIPE)
+            subprocess.check_output(['docker', 'stop', GRADER_CONTAINER_NAME], stderr=subprocess.STDOUT)
+            subprocess.check_output(['docker', 'rm', GRADER_CONTAINER_NAME], stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
             self.logger.debug("Cleanup error: %s. Proceeding!", e)
 
@@ -244,8 +244,7 @@ class Manager:
             try:
                 self.logger.info("Pulling image '%s'", solution_image)
                 self.post_message(STATUS_ENDPOINT, {solution_image: "Pulling image"})
-                pullOutput = subprocess.check_output(['docker-compose', 'pull'], stderr=subprocess.STDOUT)
-                self.logger.debug(pullOutput)
+                subprocess.check_output(['docker-compose', 'pull'], stderr=subprocess.STDOUT)
                 self.logger.debug("Inspecting image '%s'" % solution_image)
                 inspectOutput = subprocess.check_output(['docker', 'inspect', solution_image], stderr=subprocess.STDOUT)
                 tag = json.loads(inspectOutput.decode('utf-8'))[0]["Id"]
@@ -255,6 +254,7 @@ class Manager:
                 continue
 
             self.create_docker_compose_file(solution_image, solution_container_name)
+            os.makedirs(self.solution_logs_path(solution_image), exist_ok=True)
 
             self.post_message(STATUS_ENDPOINT, {solution_image: "Running experiment"})
 
