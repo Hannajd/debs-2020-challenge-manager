@@ -32,21 +32,9 @@ BENCHMARK_DOCKER_COMPOSE_TEMPLATE='docker-compose-template.yml'
 EXEUCTION_FREQUENCY_SECONDS = int(os.getenv("EXECUTION_FREQUENCY_SECONDS", default=30))
 SOLUTION_CONTAINER_NAME_PREFIX = 'solution-app-'
 GRADER_CONTAINER_NAME = 'debs-2020-grader'
-# Docker image IDs are strings with the format team/image
-# This variable chooses which of the two parts will be used for identification in manager executions of the image
-DOCKER_IMAGE_IDENTIFIER = 'team' 
 
 def extractDockerImageID(image):
-    '''Extract either of the team or the image part out of a docker image ID of the form "team/image"
-    Uses the global variable DOCKER_IMAGE_IDENTIFIER to perform the selection
-    '''
-    if DOCKER_IMAGE_IDENTIFIER == 'team':
-        index = 0
-    elif DOCKER_IMAGE_IDENTIFIER == 'image':
-        index = 1
-    else:
-        raise ValueError('Unknown DOCKER_IMAGE_IDENTIFIER: %s' % DOCKER_IMAGE_IDENTIFIER)
-    return image.split('/')[index]
+    return image.replace('/', '_')
 
 
 class Manager:
@@ -235,6 +223,8 @@ class Manager:
 
             solution_container_name = SOLUTION_CONTAINER_NAME_PREFIX + extractDockerImageID(solution_image)
 
+            self.create_docker_compose_file(solution_image, solution_container_name)
+
             try:
                 self.logger.debug("Cleaning up unused solution containers, if they are left")
                 subprocess.check_output(['docker', 'rm', solution_container_name])
@@ -253,7 +243,6 @@ class Manager:
                 self.logger.error("Error accessing image: %s: %s", solution_image, e)
                 continue
 
-            self.create_docker_compose_file(solution_image, solution_container_name)
             os.makedirs(self.solution_logs_path(solution_image), exist_ok=True)
 
             self.post_message(STATUS_ENDPOINT, {solution_image: "Running experiment"})
